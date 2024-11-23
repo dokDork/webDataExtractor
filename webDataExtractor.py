@@ -8,10 +8,33 @@ import gzip
 import io
 import os
 
+
+def get_url_level(url):
+    # Analizza l'URL
+    parsed_url = urlparse(url)
+    
+    # Ottiene il percorso dall'URL
+    path = parsed_url.path
+    
+    # Rimuove eventuali slash finali per evitare conteggi errati
+    path = path.rstrip('/')
+    
+    # Se il percorso è vuoto o solo una barra, significa che siamo alla radice
+    if not path or path == '/':
+        return 0
+    
+    # Conta il numero di segmenti nel percorso
+    segments = path.split('/')
+    
+    # Restituisce il livello, che è il numero di segmenti meno uno
+    return len(segments) - 1  # Sottraiamo 1 per considerare le pagine come livello 1
+
+
 def sanitize_filename(url):
     # Sostituisce i caratteri non validi con un trattino
     filename = re.sub(r'[^a-zA-Z0-9]', '-', url)
     return filename + '.out.txt'
+
 
 def write_to_file(filename, data):
     """Scrive i dati nel file specificato."""
@@ -19,8 +42,10 @@ def write_to_file(filename, data):
         f.write(data)
         f.write("\n")
 
+
 def is_same_domain(url, base_url):
     return urlparse(url).netloc == urlparse(base_url).netloc
+
 
 def extract_data(soup):
     emails = set()
@@ -49,6 +74,7 @@ def extract_data(soup):
 
     return emails, names, phones, comments, links
 
+
 def decompress_content(response):
     """Decompress the content if it's gzipped."""
     if response.headers.get('Content-Encoding') == 'gzip':
@@ -61,7 +87,8 @@ def decompress_content(response):
             return response.text  # Restituisce il testo non compresso in caso di errore
     return response.text
 
-def crawl_site(url, max_retries=3):
+
+def crawl_site(url, selected_level, max_retries=3):
     visited = set()  # Set per tenere traccia delle pagine già visitate
     to_visit = [url]
     all_emails = set()
@@ -76,62 +103,85 @@ def crawl_site(url, max_retries=3):
 
     while to_visit:
         current_url = to_visit.pop(0)
+        analyze=False
+        level=0
         if current_url in visited:
             continue
-
-        print(f"Analyzing: {current_url}")  # Output dell'URL attualmente analizzato
-
-        retries = 0
-        while retries < max_retries:
-            try:
-                response = requests.get(current_url, headers=headers, timeout=10)  # Timeout dopo 10 secondi
-                response.raise_for_status()  # Controlla se ci sono errori nella richiesta
-                visited.add(current_url)
-
-                # Decompressione del contenuto se necessario
-                content = decompress_content(response)
-                soup = BeautifulSoup(content, 'html.parser')
-                emails, names, phones, comments, links = extract_data(soup)
-
-                all_emails.update(emails)
-                all_names.update(names)
-                all_phones.update(phones)
-                all_comments.update(comments)
-                all_links.update(links)
-
-                to_visit.extend(links - visited)  # Aggiungi nuovi link a visitare
-                break  # Esci dal ciclo di retry se la richiesta ha successo
-
-            except requests.HTTPError as e:
-                print(f"HTTP error accessing {current_url}: {e}")
-                retries += 1
-                time.sleep(2)  # Aspetta 2 secondi prima di riprovare
             
-            except requests.RequestException as e:
-                print(f"Error accessing {current_url}: {e}")
-                retries += 1
-                time.sleep(2)  # Aspetta 2 secondi prima di riprovare
+        if selected_level>-1:
+            # se selected_item>-1 allora guardo che livello sto analizzando e nel caso decido se analizzare o skippare l'analisi
+            level=get_url_level(current_url)
+            if level<=selected_level:
+               analyze=True
+            else:
+               analyze=False
+        else:
+            # se selected_item=-1 allora devo analuzzare tutto il sito
+            level="All"
+            analyze=True       
 
-        if retries == max_retries:
-            print(f"Unable to access {current_url} after {max_retries} attempts. Treated as read.")
+        if analyze==True:
+            # se devo analizzare la pagina
+            print(f"Analyzing:[L-{level}] {current_url}")  # Output dell'URL attualmente analizzato
+            retries = 0
+            while retries < max_retries:
+                try:
+                    response = requests.get(current_url, headers=headers, timeout=10)  # Timeout dopo 10 secondi
+                    response.raise_for_status()  # Controlla se ci sono errori nella richiesta
+                    visited.add(current_url)
 
-        visited.add(current_url)  # Aggiungi comunque l'URL alla lista dei visitati
+                    # Decompressione del contenuto se necessario
+                    content = decompress_content(response)
+                    soup = BeautifulSoup(content, 'html.parser')
+                    emails, names, phones, comments, links = extract_data(soup)
 
+                    all_emails.update(emails)
+                    all_names.update(names)
+                    all_phones.update(phones)
+                    all_comments.update(comments)
+                    all_links.update(links)
+
+                    to_visit.extend(links - visited)  # Aggiungi nuovi link a visitare
+                    break  # Esci dal ciclo di retry se la richiesta ha successo
+
+                except requests.HTTPError as e:
+                    print(f"HTTP error accessing {current_url}: {e}")
+                    retries += 1
+                    time.sleep(2)  # Aspetta 2 secondi prima di riprovare
+            
+                except requests.RequestException as e:
+                    print(f"Error accessing {current_url}: {e}")
+                    retries += 1
+                    time.sleep(2)  # Aspetta 2 secondi prima di riprovare
+
+            if retries == max_retries:
+                print(f"Unable to access {current_url} after {max_retries} attempts. Treated as read.")
+
+            visited.add(current_url)  # Aggiungi comunque l'URL alla lista dei visitati
+        else:
+            # non devo analizzare la pagina
+            print(f"Skipping:[L-{level}] {current_url}")  # Output dell'URL attualmente analizzato
+                             
     return all_emails, all_names, all_phones, all_comments, all_links
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print(f"Use: python {sys.argv[0]} <target url>")
+    if len(sys.argv) < 2:
+        print(f"Use: python {sys.argv[0]} <target url> [<level>]")
         print ("It explores all the web pages of a specific web site and extract from them: emails, Usernames, HTML comments, Telephone number and Links.")
+        print ("Parameters:")
+        print ("- <target_url>: url to extract information from")
+        print ("- [<level>]: level at which to stop scanning pages. If not specified the entire site will be scanned")
+        print (f"\nExample: {sys.argv[0]} https://targetSite.htb 3")
         sys.exit(1)
 
     base_url = sys.argv[1]
+    selected_level = int(sys.argv[2]) if len(sys.argv) > 2 else -1
     filename = sanitize_filename(base_url)
     # Controlla se il file esiste già
     if os.path.exists(filename):
         os.remove(filename)    
 
-    emails, names, phones, comments, links = crawl_site(base_url)
+    emails, names, phones, comments, links = crawl_site(base_url, selected_level)
     write_to_file(filename, "Web Data Extractor: " + base_url)
     print("\n\n")    
     print("== Email found:")
