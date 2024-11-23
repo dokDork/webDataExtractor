@@ -1,4 +1,4 @@
-# DNSWatchdog
+# webDataExtractor
 [![License](https://img.shields.io/badge/license-MIT-_red.svg)](https://opensource.org/licenses/MIT)  
 <img src="https://raw.githubusercontent.com/dokDork/webDataExtractor/refs/heads/main/images/webDataExtractor.jpg" width="250" height="250">  
 
